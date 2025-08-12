@@ -28,6 +28,9 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	if err != nil {
 		return nil, err
 	}
+	if numBytes == 0 {
+
+	}
 	return &Request{RequestLine: requestLine}, nil
 }
 
@@ -69,4 +72,10 @@ func isAllLetters(s string) bool {
 		}
 	}
 	return true
+}
+
+func (r *Request) parse(data []byte) (int, error) {
+	if r.state == 0 {
+		r.RequestLine += string()
+	}
 }
