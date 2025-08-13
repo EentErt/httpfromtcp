@@ -7,9 +7,18 @@ import (
 	"unicode"
 )
 
+const bufferSize = 8
+
+type state int
+
+const (
+	initialized state = iota
+	done
+)
+
 type Request struct {
 	RequestLine RequestLine
-	state       int
+	state       state
 }
 
 type RequestLine struct {
@@ -19,26 +28,50 @@ type RequestLine struct {
 }
 
 func RequestFromReader(reader io.Reader) (*Request, error) {
-	rawRequest, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
+
+	buffer := make([]byte, bufferSize, bufferSize)
+	readToIndex := 0
+
+	request := Request{
+		state: 0,
 	}
 
-	requestLine, numBytes, err := parseRequestLine(string(rawRequest))
-	if err != nil {
-		return nil, err
-	}
-	if numBytes == 0 {
+	for request.state != done {
+		if readToIndex == len(buffer) {
+			newBuffer := make([]byte, len(buffer)*2)
+			copy(newBuffer, buffer)
+			buffer = newBuffer
+		}
 
+		bytesRead, err := reader.Read(buffer[readToIndex:])
+		if err == io.EOF {
+			request.state = done
+			break
+		} else if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("error reading from reader: %v", err)
+		}
+
+		readToIndex += bytesRead
+
+		bytesParsed, err := request.parse(buffer[:readToIndex])
+		if err != nil {
+			return nil, fmt.Errorf("error parsing request: %v", err)
+		} else if bytesParsed == 0 {
+			continue
+		}
+
+		copy(buffer, buffer[bytesParsed:readToIndex])
+		readToIndex -= bytesParsed
 	}
-	return &Request{RequestLine: requestLine}, nil
+	return &request, nil
 }
 
 func parseRequestLine(request string) (RequestLine, int, error) {
-	requestLine := strings.Split(request, "\r\n")[0]
-	if !strings.Contains(requestLine, "\r\n") {
+	if !strings.Contains(request, "\r\n") {
 		return RequestLine{}, 0, nil
 	}
+
+	requestLine := strings.Split(request, "\r\n")[0]
 
 	parts := strings.Split(requestLine, " ")
 	if len(parts) != 3 {
@@ -62,7 +95,7 @@ func parseRequestLine(request string) (RequestLine, int, error) {
 		HttpVersion:   httpVersion,
 		RequestTarget: parts[1],
 		Method:        parts[0],
-	}, 0, nil
+	}, len(requestLine) + 2, nil
 }
 
 func isAllLetters(s string) bool {
@@ -75,7 +108,22 @@ func isAllLetters(s string) bool {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
-	if r.state == 0 {
-		r.RequestLine += string()
+	switch r.state {
+	case initialized:
+		requestLine, numBytes, err := parseRequestLine(string(data))
+		if err != nil {
+			return 0, err
+		}
+		if numBytes == 0 {
+			return 0, nil
+		}
+
+		r.state = done
+		r.RequestLine = requestLine
+		return numBytes, nil
+	case done:
+		return 0, fmt.Errorf("error: trying to read data in a done state")
+	default:
+		return 0, fmt.Errorf("error: unknown state")
 	}
 }
