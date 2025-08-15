@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"httpfromtcp/internal/request"
 	"net"
-	"strings"
 )
 
 func main() {
@@ -22,16 +21,31 @@ func main() {
 		}
 
 		fmt.Println("connection accepted")
-		ch := getLinesChannel(conn)
 
-		for line := range ch {
-			fmt.Printf("%s\n", line)
+		req, err := request.RequestFromReader(conn)
+		if err != nil {
+			fmt.Printf("Error reading request: %v", err)
+			conn.Close()
 		}
-		fmt.Println("connection closed")
+
+		fmt.Println("Request line:")
+		fmt.Printf("- Method: %s\n", req.RequestLine.Method)
+		fmt.Printf("- Target: %s\n", req.RequestLine.RequestTarget)
+		fmt.Printf("- Version: %s\n", req.RequestLine.HttpVersion)
 		conn.Close()
+		/*
+			ch := getLinesChannel(conn)
+
+			for line := range ch {
+				fmt.Printf("%s\n", line)
+			}
+			fmt.Println("connection closed")
+			conn.Close()
+		*/
 	}
 }
 
+/*
 func getLinesChannel(f io.ReadCloser) <-chan string {
 	ch := make(chan string)
 	go func() {
@@ -72,3 +86,4 @@ func getLinesChannel(f io.ReadCloser) <-chan string {
 	}()
 	return ch
 }
+*/

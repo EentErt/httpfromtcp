@@ -5,6 +5,8 @@ import (
 	"io"
 	"strings"
 	"unicode"
+
+	"httpfromtcp/internal/headers"
 )
 
 const bufferSize = 8
@@ -14,11 +16,13 @@ type state int
 const (
 	initialized state = iota
 	done
+	requestStateParsingHeaders
 )
 
 type Request struct {
 	RequestLine RequestLine
 	state       state
+	Headers     headers.Headers
 }
 
 type RequestLine struct {
@@ -33,7 +37,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	readToIndex := 0
 
 	request := Request{
-		state: 0,
+		state: initialized,
 	}
 
 	for request.state != done {
@@ -108,6 +112,29 @@ func isAllLetters(s string) bool {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
+	totalBytesParsed := 0
+	for r.state != done {
+		n, err := r.parseSingle(data[totalBytesParsed:])
+		if err != nil {
+			return 0, err
+			// an error occurred
+		}
+		if n == 0 {
+			return 0, nil
+			// no bytes parsed, request more data
+		}
+
+		totalBytesParsed += n
+		/*
+			if totalBytesParsed == len(data) {
+				r.state = done
+			}
+		*/
+	}
+	return totalBytesParsed, nil
+}
+
+func (r *Request) parseSingle(data []byte) (int, error) {
 	switch r.state {
 	case initialized:
 		requestLine, numBytes, err := parseRequestLine(string(data))
@@ -118,11 +145,22 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, nil
 		}
 
-		r.state = done
+		r.state = requestStateParsingHeaders
 		r.RequestLine = requestLine
 		return numBytes, nil
 	case done:
 		return 0, fmt.Errorf("error: trying to read data in a done state")
+	case requestStateParsingHeaders:
+		numBytes, end, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+
+		if end {
+			r.state = done
+			return numBytes, nil
+		}
+		return 0, nil
 	default:
 		return 0, fmt.Errorf("error: unknown state")
 	}
