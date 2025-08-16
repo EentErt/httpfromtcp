@@ -3,6 +3,7 @@ package request
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -17,12 +18,14 @@ const (
 	initialized state = iota
 	done
 	requestStateParsingHeaders
+	requestStateParsingBody
 )
 
 type Request struct {
 	RequestLine RequestLine
 	state       state
 	Headers     headers.Headers
+	Body        []byte
 }
 
 type RequestLine struct {
@@ -37,7 +40,8 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	readToIndex := 0
 
 	request := Request{
-		state: initialized,
+		state:   initialized,
+		Headers: headers.NewHeaders(),
 	}
 
 	for request.state != done {
@@ -49,7 +53,6 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 		bytesRead, err := reader.Read(buffer[readToIndex:])
 		if err == io.EOF {
-			request.state = done
 			break
 		} else if err != nil && err != io.EOF {
 			return nil, fmt.Errorf("error reading from reader: %v", err)
@@ -67,6 +70,13 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		copy(buffer, buffer[bytesParsed:readToIndex])
 		readToIndex -= bytesParsed
 	}
+
+	if request.state != done && request.state != requestStateParsingBody {
+		return nil, fmt.Errorf("incomplete request: all data parsed, but no end was found")
+	} else if request.state == requestStateParsingBody {
+		return nil, fmt.Errorf("incomplete request: body length is less than reported content length")
+	}
+
 	return &request, nil
 }
 
@@ -114,22 +124,18 @@ func isAllLetters(s string) bool {
 func (r *Request) parse(data []byte) (int, error) {
 	totalBytesParsed := 0
 	for r.state != done {
+		// fmt.Println("parsing data:", string(data[totalBytesParsed:]))
 		n, err := r.parseSingle(data[totalBytesParsed:])
 		if err != nil {
 			return 0, err
 			// an error occurred
 		}
 		if n == 0 {
-			return 0, nil
+			return totalBytesParsed, nil
 			// no bytes parsed, request more data
 		}
 
 		totalBytesParsed += n
-		/*
-			if totalBytesParsed == len(data) {
-				r.state = done
-			}
-		*/
 	}
 	return totalBytesParsed, nil
 }
@@ -157,11 +163,53 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 		}
 
 		if end {
-			r.state = done
-			return numBytes, nil
+			r.state = requestStateParsingBody
+			return numBytes + 2, nil
 		}
-		return 0, nil
+
+		return numBytes, nil
+	case requestStateParsingBody:
+		contentLength, ok := r.Headers.Get("Content-Length")
+
+		// if no content length header, return
+		if !ok {
+			r.state = done
+			return 0, nil
+		}
+
+		r.Body = append(r.Body, data...)
+		//fmt.Println(string(r.Body))
+
+		length, err := strconv.Atoi(contentLength)
+		if err != nil {
+			return 0, fmt.Errorf("error: invalid content length: %v", err)
+		}
+
+		// fmt.Printf("Content Length: %d\n Body Length: %d\n", length, len(r.Body))
+
+		if length == len(r.Body) {
+			r.state = done
+		} else if length < len(r.Body) {
+			return 0, fmt.Errorf("error: body length is greater than reported content length")
+		}
+
+		return len(data), nil
 	default:
 		return 0, fmt.Errorf("error: unknown state")
+	}
+}
+
+func (r *Request) PrintRequest() {
+	fmt.Println("Request line:")
+	fmt.Println("- Method:", r.RequestLine.Method)
+	fmt.Println("- Target:", r.RequestLine.RequestTarget)
+	fmt.Println("- Version:", r.RequestLine.HttpVersion)
+	fmt.Println("Headers:")
+	for key, value := range r.Headers {
+		fmt.Printf("- %s: %s\n", key, value)
+	}
+	if len(r.Body) > 0 {
+		fmt.Println("Body:")
+		fmt.Println(string(r.Body))
 	}
 }

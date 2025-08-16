@@ -28,20 +28,7 @@ func main() {
 			conn.Close()
 		}
 
-		fmt.Println("Request line:")
-		fmt.Printf("- Method: %s\n", req.RequestLine.Method)
-		fmt.Printf("- Target: %s\n", req.RequestLine.RequestTarget)
-		fmt.Printf("- Version: %s\n", req.RequestLine.HttpVersion)
-		conn.Close()
-		/*
-			ch := getLinesChannel(conn)
-
-			for line := range ch {
-				fmt.Printf("%s\n", line)
-			}
-			fmt.Println("connection closed")
-			conn.Close()
-		*/
+		req.PrintRequest()
 	}
 }
 
