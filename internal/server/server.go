@@ -68,7 +68,7 @@ func (s *Server) handle(conn net.Conn) {
 	buffer := bytes.Buffer{}
 
 	handlerError := s.handler(&buffer, req)
-	if handlerError.StatusCode != 200 {
+	if handlerError != nil {
 		writeError(conn, handlerError)
 	}
 
@@ -76,7 +76,7 @@ func (s *Server) handle(conn net.Conn) {
 		fmt.Println("Error writing response status line")
 	}
 
-	headers := response.GetDefaultHeaders(0)
+	headers := response.GetDefaultHeaders(buffer.Len())
 	if err := response.WriteHeaders(conn, headers); err != nil {
 		fmt.Printf("Error writing headers: %v\n", err)
 	}
@@ -106,6 +106,20 @@ func writeError(w io.Writer, h *HandlerError) {
 		fmt.Println("Error writing response status line")
 	}
 
-	writeBytes := []byte(string(int(h.StatusCode)) + "\r\n" + h.Message)
-	w.Write(writeBytes)
+	headers := response.GetDefaultHeaders(len(h.Message))
+	if err := response.WriteHeaders(w, headers); err != nil {
+		fmt.Printf("Error writing headers: %v\n", err)
+	}
+
+	// write the crlf between headers and body
+	_, err := w.Write([]byte("\r\n"))
+	if err != nil {
+		fmt.Printf("Error writing CRLF: %v\n", err)
+	}
+
+	// write the response body
+	_, err = w.Write([]byte(h.Message))
+	if err != nil {
+		fmt.Printf("Error writing response body: %v\n", err)
+	}
 }

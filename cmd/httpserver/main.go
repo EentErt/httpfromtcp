@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"httpfromtcp/internal/request"
@@ -28,13 +29,15 @@ func main() {
 }
 
 func handler(w io.Writer, req *request.Request) *server.HandlerError {
-	switch req.RequestLine.RequestTarget {
-	case "/yourproblem":
+	target := strings.Split(req.RequestLine.RequestTarget, "/")
+	path := target[len(target)-1]
+	switch path {
+	case "yourproblem":
 		return &server.HandlerError{
 			StatusCode: 400,
 			Message:    "Your problem is not my problem",
 		}
-	case "/myproblem":
+	case "myproblem":
 		return &server.HandlerError{
 			StatusCode: 500,
 			Message:    "Woopsie, my bad",
