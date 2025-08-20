@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
 	"httpfromtcp/internal/request"
 	"httpfromtcp/internal/response"
@@ -65,36 +64,35 @@ func (s *Server) handle(conn net.Conn) {
 		writeError(conn, &HandlerError{StatusCode: 500, Message: fmt.Sprintf("Error: %v", err)})
 	}
 
-	buffer := bytes.Buffer{}
+	writer := response.MakeWriter(conn)
 
-	handlerError := s.handler(&buffer, req)
-	if handlerError != nil {
-		writeError(conn, handlerError)
-	}
+	s.handler(writer, req)
 
-	if err := response.WriteStatusLine(conn, 200); err != nil {
-		fmt.Println("Error writing response status line")
-	}
+	/*
+		if err := response.WriteStatusLine(conn, 200); err != nil {
+			fmt.Println("Error writing response status line")
+		}
 
-	headers := response.GetDefaultHeaders(buffer.Len())
-	if err := response.WriteHeaders(conn, headers); err != nil {
-		fmt.Printf("Error writing headers: %v\n", err)
-	}
+		headers := response.GetDefaultHeaders(buffer.Len())
+		if err := response.WriteHeaders(conn, headers); err != nil {
+			fmt.Printf("Error writing headers: %v\n", err)
+		}
 
-	// write the crlf between headers and body
-	_, err = conn.Write([]byte("\r\n"))
-	if err != nil {
-		fmt.Printf("Error writing CRLF: %v\n", err)
-	}
+		// write the crlf between headers and body
+		_, err = conn.Write([]byte("\r\n"))
+		if err != nil {
+			fmt.Printf("Error writing CRLF: %v\n", err)
+		}
 
-	// write the response body
-	_, err = conn.Write(buffer.Bytes())
-	if err != nil {
-		fmt.Printf("Error writing CRLF: %v\n", err)
-	}
+		// write the response body
+		_, err = conn.Write(buffer.Bytes())
+		if err != nil {
+			fmt.Printf("Error writing CRLF: %v\n", err)
+		}
+	*/
 }
 
-type Handler func(w io.Writer, request *request.Request) *HandlerError
+type Handler func(w *response.Writer, request *request.Request)
 
 type HandlerError struct {
 	StatusCode response.StatusCode
