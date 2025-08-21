@@ -1,13 +1,18 @@
 package main
 
 import (
+	"crypto/sha256"
+	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
 
+	"httpfromtcp/internal/headers"
 	"httpfromtcp/internal/request"
 	"httpfromtcp/internal/response"
 	"httpfromtcp/internal/server"
@@ -30,8 +35,13 @@ func main() {
 }
 
 func handler(w *response.Writer, req *request.Request) {
-	target := strings.Split(req.RequestLine.RequestTarget, "/")
-	path := target[len(target)-1]
+
+	if strings.HasPrefix(req.RequestLine.RequestTarget, "/httpbin/") {
+		proxyHandler(w, req)
+		return
+	}
+
+	path := strings.TrimPrefix(req.RequestLine.RequestTarget, "/")
 
 	headers := response.GetDefaultHeaders(0)
 	headers["content-type"] = "text/html"
@@ -60,6 +70,63 @@ func handler(w *response.Writer, req *request.Request) {
 		w.WriteBody(body)
 
 	}
+}
+
+func proxyHandler(w *response.Writer, req *request.Request) {
+	h := headers.Headers{
+		"Content-Type":      "text/plain",
+		"Transfer-Encoding": "chunked",
+		"Trailer":           "X-Content-SHA256, X-Content-Length",
+	}
+
+	buffer := make([]byte, 32)
+	target := strings.TrimPrefix(req.RequestLine.RequestTarget, "/httpbin")
+
+	resp, err := http.Get("https://httpbin.org" + target)
+	if err != nil {
+		w.WriteError(err)
+	}
+	defer resp.Body.Close()
+
+	/*
+		_, err = resp.Body.Read(buffer)
+		if err != nil {
+			w.WriteError(err)
+		}
+		defer resp.Body.Close()
+	*/
+
+	w.WriteStatusLine(response.StatusOK)
+
+	w.WriteHeaders(h)
+
+	body := []byte{}
+	bodyLength := 0
+	for {
+		n, err := resp.Body.Read(buffer)
+		if n > 0 {
+			body = append(body, buffer[:n]...)
+			length, _ := w.WriteChunkedBody(buffer[:n])
+			bodyLength += length
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			w.WriteError(err)
+		}
+	}
+	w.WriteChunkedBodyDone()
+
+	hash := sha256.Sum256(body)
+
+	trailers := headers.Headers{
+		"X-Content-SHA256": fmt.Sprintf("%x", hash),
+		"X-Content-Length": strconv.Itoa(bodyLength),
+	}
+
+	w.WriteTrailers(trailers)
+	w.WriteDone()
 }
 
 func bodyBytes(code int) []byte {

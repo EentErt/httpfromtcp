@@ -21,6 +21,8 @@ const (
 	writeStatus writerState = iota
 	writeHeaders
 	writeBody
+	writeTrailers
+	writeDone
 )
 
 type Writer struct {
@@ -88,7 +90,75 @@ func (w *Writer) WriteBody(p []byte) (int, error) {
 		return 0, err
 	}
 
+	w.writerState = writeTrailers
 	return i, nil
+}
+
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	if w.writerState != writeBody {
+		return 0, fmt.Errorf("cannot write body")
+	}
+
+	lengthLine := fmt.Sprintf("%x\r\n", len(p))
+
+	_, err := w.Writer.Write([]byte(lengthLine))
+	if err != nil {
+		return 0, err
+	}
+
+	j, err := w.Writer.Write(append(p, []byte("\r\n")...))
+	if err != nil {
+		return 0, err
+	}
+
+	return j - 2, nil
+}
+
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	if w.writerState != writeBody {
+		return 0, fmt.Errorf("cannot write body")
+	}
+
+	i, err := w.Writer.Write([]byte("0\r\n"))
+	if err != nil {
+		return 0, err
+	}
+
+	w.writerState = writeTrailers
+	return i, nil
+}
+
+func (w *Writer) WriteTrailers(h headers.Headers) error {
+	if w.writerState != writeTrailers {
+		return fmt.Errorf("cannot write trailers")
+	}
+	for key, value := range h {
+		_, err := w.Writer.Write([]byte(key + ": " + value + "\r\n"))
+		if err != nil {
+			return err
+		}
+	}
+	_, err := w.Writer.Write([]byte("\r\n"))
+	if err != nil {
+		return err
+	}
+
+	w.writerState = writeDone
+	return nil
+}
+
+func (w *Writer) WriteDone() error {
+	_, err := w.Writer.Write([]byte("\r\n"))
+	return err
+}
+
+func (w *Writer) WriteError(err error) {
+	headers := GetDefaultHeaders(0)
+	body := []byte(fmt.Sprintf("%v", err))
+	w.WriteStatusLine(StatusServerError)
+	headers["content-length"] = strconv.Itoa(len(body))
+	w.WriteHeaders(headers)
+	w.WriteBody(body)
 }
 
 func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
